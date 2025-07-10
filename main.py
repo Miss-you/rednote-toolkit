@@ -21,11 +21,19 @@ async def main():
 
     # Publish the note
     storage_state_path = "storage_state.json"
-    async with RedNoteClient(storage_state_path) as client:
-        result = await client.publish_note(note)
-        print(f"Success: {result.success}")
-        print(f"Message: {result.message}")
-        print(f"URL: {result.final_url}")
+    client = RedNoteClient(storage_state_path)
+    try:
+        async with client:
+            result = await client.publish_note(note)
+            print(f"Success: {result.success}")
+            print(f"Message: {result.message}")
+            print(f"URL: {result.final_url}")
+    finally:
+        # Explicitly close the browser to ensure cleanup,
+        # even if some background tasks are lingering.
+        print("Ensuring browser is closed...")
+        await client.browser_manager.close_browser()
+        print("Browser closed.")
 
 if __name__ == "__main__":
     asyncio.run(main())

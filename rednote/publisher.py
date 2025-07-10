@@ -45,23 +45,51 @@ class Publisher:
         publish_url = "https://creator.xiaohongshu.com/publish/publish"
         await self.page.goto(publish_url)
         # Wait for the title input to be visible as a sign that the page has loaded
-        await expect(self.page.locator('input[placeholder*="填写标题"]')).to_be_visible(timeout=15000)
+        publish_page_locator = self.page.locator(
+                "//*[text()='上传图文'] | "
+                "//*[text()='上传视频']"
+            )
+            
+        await expect(publish_page_locator.first).to_be_visible(timeout=15000)
+        print("Publish page loaded")
 
 
     async def _submit_note(self, note: RedNote) -> RedPublishResult:
-        """Submits the note."""
+        """Submits the note and waits for a success message."""
         try:
-            # The selector for the publish button might need to be adjusted.
-            # Using a more generic selector based on text content.
-            publish_button = self.page.locator('button:has-text("发布")')
+            # Save a snapshot right before the final click for debugging.
+            await self._save_debug_info("final_publish_click")
+
+            # This powerful XPath locator finds the button by its content, ignoring comments and whitespace.
+            publish_button = self.page.locator("//button[.//span[normalize-space(.) = '发布']]")
+            
+            print("Waiting 10 seconds for uploads to finalize...")
+            await self.page.wait_for_timeout(10000) # 10-second wait as requested.
+            
+            print("Attempting to click the final publish button...")
+            await expect(publish_button).to_be_enabled(timeout=10000)
             await publish_button.click()
             
-            # Wait for a success indicator. This could be a URL change,
-            # or a "published successfully" message.
-            # For now, we'll wait for a reasonable time, but a more robust
-            # solution would be to wait for a specific element.
-            await self.page.wait_for_timeout(5000)
+            # Wait for the "发布成功" success message to appear. This is the most reliable indicator.
+            print("Waiting for '发布成功' confirmation message...")
+            success_locator = self.page.locator("//*[contains(text(), '发布成功')]")
+            await expect(success_locator).to_be_visible(timeout=30000)
 
+            print("Confirmation message received. Note published successfully.")
             return RedPublishResult(success=True, message="Note published successfully.", note_title=note.title, final_url=self.page.url)
         except Exception as e:
+            print(f"Failed to submit note or confirm success. Check 'debug_final_publish_click.html' and '.png' for details.")
             return RedPublishResult(success=False, message=f"Failed to submit note: {e}", note_title=note.title)
+
+    async def _save_debug_info(self, base_filename: str):
+        """Saves a screenshot and HTML content for debugging."""
+        screenshot_path = f"debug_{base_filename}.png"
+        html_path = f"debug_{base_filename}.html"
+        print(f"\n--- Saving debug info to {screenshot_path} and {html_path} ---")
+        try:
+            await self.page.screenshot(path=screenshot_path, full_page=True)
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(await self.page.content())
+            print("--- Debug info saved successfully. ---")
+        except Exception as e:
+            print(f"--- Failed to save debug info: {e} ---")

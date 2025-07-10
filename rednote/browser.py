@@ -34,7 +34,7 @@ class BrowserManager:
             # This is much more reliable than checking for a single element.
             creator_home_locator = self.page.locator(
                 "//button[contains(., '发布笔记')] | "
-                "//*[text()='内容分析'] | "
+                "//*[text()='账号概览'] | "
                 "//*[text()='笔记管理']"
             )
             

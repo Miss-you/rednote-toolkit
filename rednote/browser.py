@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import asyncio
 from playwright.async_api import async_playwright, Page, Browser, Playwright, expect
 
@@ -23,26 +24,21 @@ class BrowserManager:
         self.context = await self.browser.new_context(**context_args)
         self.page = await self.context.new_page()
         
+        # Navigate to the creator home. If not logged in, this will redirect to the login page.
         await self.page.goto("https://creator.xiaohongshu.com/creator/home")
-
-        try:
-            # Quick check to see if we are already logged in.
-            print("Checking for '发布笔记' button to verify login status...")
-            await expect(self.page.get_by_role("button", name="发布笔记")).to_be_visible(timeout=10000)
-            print("Logged in successfully using stored state.")
-            return
-        except Exception:
-            print("Initial check failed. Proceeding to manual login.")
-
-        # Not logged in, so let's guide the user through the login process.
-        print("Redirecting to login page...")
-        await self.page.goto("https://creator.xiaohongshu.com/login?source=&redirectReason=401&lastUrl=%252Fcreator%252Fhome")
         
-        print("Please scan the QR code to log in. The script will automatically detect successful login.")
+        print("Waiting for login and page load... Please log in if prompted.")
 
         try:
-            # Wait for successful login by polling for either the URL change or the presence of the publish button.
-            await self._wait_for_login_completion(timeout=120) # 2 minutes timeout
+            # This robust locator waits for ANY of the key creator center elements to be visible.
+            # This is much more reliable than checking for a single element.
+            creator_home_locator = self.page.locator(
+                "//button[contains(., '发布笔记')] | "
+                "//*[text()='内容分析'] | "
+                "//*[text()='笔记管理']"
+            )
+            
+            await expect(creator_home_locator.first).to_be_visible(timeout=120000) # 2 minutes
             
             print("Login successful and creator page loaded.")
             
@@ -53,39 +49,27 @@ class BrowserManager:
             print(f"Storage state saved to {self.storage_state_path}")
 
         except Exception as e:
-            print(f"Login failed after timeout or due to an error: {e}")
-            print("Saving current page content to 'page_content_error.html' for analysis.")
-            page_content = await self.page.content()
-            with open("page_content_error.html", "w", encoding="utf-8") as f:
-                f.write(page_content)
-            raise  # Re-raise the exception to stop the script
-
-    async def _wait_for_login_completion(self, timeout: int):
-        """
-        Waits for the user to log in by checking for navigation to the creator home
-        or the appearance of a key element on the page.
-        """
-        start_time = asyncio.get_event_loop().time()
-        while (asyncio.get_event_loop().time() - start_time) < timeout:
+            print(f"Login failed. The '发布笔记' button did not appear within the timeout.")
+            print("Taking a screenshot and saving page content for analysis...")
+            
+            # Generate diagnostic files
+            screenshot_path = "login_error_screenshot.png"
+            html_path = "page_content_error.html"
+            
             try:
-                # Condition 1: Check if the URL is the creator home page.
-                if "creator.xiaohongshu.com/creator/home" in self.page.url:
-                    print("Login detected: Navigated to creator home page.")
-                    # Even if URL matches, wait for the button to ensure the page is interactive
-                    await expect(self.page.get_by_role("button", name="发布笔记")).to_be_visible(timeout=20000)
-                    return
+                await self.page.screenshot(path=screenshot_path, full_page=True)
+                print(f"Screenshot saved to: {screenshot_path}")
+                
+                page_content = await self.page.content()
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(page_content)
+                print(f"Page HTML saved to: {html_path}")
+                
+            except Exception as diag_e:
+                print(f"Could not save diagnostic files: {diag_e}")
 
-                # Condition 2: Check if the "发布笔记" button is visible (a strong indicator of being logged in)
-                await expect(self.page.get_by_role("button", name="发布笔记")).to_be_visible(timeout=5000)
-                print("Login detected: '发布笔记' button is visible.")
-                return
-
-            except Exception:
-                # This is expected if the login is not yet complete.
-                print(f"Waiting for login... (elapsed: {int(asyncio.get_event_loop().time() - start_time)}s)")
-                await asyncio.sleep(5) # Wait 5 seconds before the next check.
-        
-        raise TimeoutError(f"Login was not completed within the {timeout} second timeout.")
+            print(f"\nOriginal error: {e}")
+            raise # Re-raise the exception to stop the script
 
     async def navigate_to(self, url: str):
         """Navigates the browser to a specific URL."""

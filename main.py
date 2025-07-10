@@ -1,6 +1,6 @@
 import asyncio
 from rednote.client import RedNoteClient
-from rednote.models import XHSNote
+from rednote.models import RedNote
 
 async def main():
     """Main function to publish a note."""
@@ -11,7 +11,7 @@ async def main():
     # img.save('placeholder.jpg')
 
     # Create a note
-    note = XHSNote(
+    note = RedNote(
         title="My First Note via RedNote Toolkit",
         content="This is a test note published using the RedNote Toolkit.",
         # IMPORTANT: Replace with a real, absolute image path

@@ -1,3 +1,7 @@
 ref/
 sending_notes_logic.md
 rednote/__pycache__/
+*.html
+*.png
+*.jpeg
+*.jpg

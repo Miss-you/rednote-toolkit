@@ -17,12 +17,14 @@ class RedNoteClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.browser_manager.close_browser()
 
-    async def publish_note(self, note: RedNote) -> RedPublishResult:
+    async def publish_note(self, note: RedNote, auto_publish: bool = True) -> RedPublishResult:
         """
         Publishes a note to Xiaohongshu.
 
         Args:
             note: The note to publish.
+            auto_publish: Whether to automatically click the publish button. If False,
+                         the process will stop before final submission for manual confirmation.
 
         Returns:
             The result of the publishing attempt.
@@ -30,4 +32,4 @@ class RedNoteClient:
         if not self.publisher:
             raise Exception("Client not initialized. Use 'async with' statement.")
             
-        return await self.publisher.publish_note(note)
+        return await self.publisher.publish_note(note, auto_publish)

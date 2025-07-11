@@ -24,7 +24,14 @@ async def main():
     client = RedNoteClient(storage_state_path)
     try:
         async with client:
+            # 自动发布模式（默认）
             result = await client.publish_note(note)
+            
+            # 或者使用手动确认模式：
+            # result = await client.publish_note(note, auto_publish=False)
+            # 使用 auto_publish=False 时，程序会在最后一步停止，
+            # 等待用户手动点击发布按钮进行二次确认
+            
             print(f"Success: {result.success}")
             print(f"Message: {result.message}")
             print(f"URL: {result.final_url}")

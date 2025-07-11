@@ -34,6 +34,32 @@ class Filler:
             await self._save_debug_info("content_fill_error")
             return False
 
+    # 合并内容和话题
+    async def fill_content_with_topics(self, content: str, topics: list[str]) -> bool:
+        """Fills the note's content and topics together in one operation to avoid cursor positioning issues."""
+        try:
+            # 合并内容和话题
+            full_content = content
+            if topics:
+                full_content += "\n"  # 在内容和话题之间添加换行
+                for topic in topics:
+                    full_content += f"#{topic} "
+            
+            # 使用相同的编辑器填写完整内容
+            content_selector = "div.ql-editor"
+            content_element = self.page.locator(content_selector)
+            
+            await expect(content_element).to_be_visible(timeout=10000)
+            await content_element.click() # Focus the editor
+            await content_element.fill(full_content) # 一次性填写所有内容
+            
+            print(f"Successfully filled content with {len(topics)} topics")
+            return True
+        except Exception as e:
+            print(f"Error filling content with topics: {e}")
+            await self._save_debug_info("content_with_topics_fill_error")
+            return False
+
     async def fill_topics(self, topics: list[str]) -> bool:
         """Fills the note's topics by typing, selecting from the suggestion list, and then adding a space."""
         if not topics:
@@ -43,6 +69,20 @@ class Filler:
             print("Filling topics...")
             editor_locator = self.page.locator("div.ql-editor")
             await expect(editor_locator).to_be_visible()
+
+            # 确保光标在编辑器内容的末尾
+            await editor_locator.click()
+            
+            # 使用多次按下向下箭头键来确保光标到达内容末尾
+            # 这比使用End键更可靠，因为它会处理多行内容
+            for _ in range(10):  # 最多按10次向下键，应该足够到达末尾
+                await self.page.keyboard.press("ArrowDown")
+            
+            # 然后按End键确保在当前行的末尾
+            await self.page.keyboard.press("End")
+            
+            # 在内容末尾添加两个换行，为话题留出空间
+            await editor_locator.type("\n\n")
 
             for topic in topics:
                 print(f"  - Adding topic: {topic}")

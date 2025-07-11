@@ -10,8 +10,14 @@ class Publisher:
         self.uploader = Uploader(page)
         self.filler = Filler(page)
 
-    async def publish_note(self, note: RedNote) -> RedPublishResult:
-        """Publishes a note following the correct sequence."""
+    async def publish_note(self, note: RedNote, auto_publish: bool = True) -> RedPublishResult:
+        """Publishes a note following the correct sequence.
+        
+        Args:
+            note: The note to publish.
+            auto_publish: Whether to automatically click the publish button. If False, 
+                         the process will stop before final submission for manual confirmation.
+        """
         try:
             # 1. Navigate to the publish page first.
             await self._navigate_to_publish_page()
@@ -31,11 +37,13 @@ class Publisher:
             if not await self.filler.fill_content(note.content):
                 return RedPublishResult(success=False, message="Failed to fill content.", note_title=note.title)
 
+            # Try to fill topics, but don't fail the entire process if it fails
             if not await self.filler.fill_topics(note.topics):
-                return RedPublishResult(success=False, message="Failed to fill topics.", note_title=note.title)
+                print(f"警告: 话题填写失败，但继续发布流程。话题内容: {note.topics}")
+                # Continue with the publishing process despite topics failure
 
             # 4. Submit the note.
-            return await self._submit_note(note)
+            return await self._submit_note(note, auto_publish)
 
         except Exception as e:
             return RedPublishResult(success=False, message=f"An error occurred: {e}", note_title=note.title)
@@ -54,7 +62,7 @@ class Publisher:
         print("Publish page loaded")
 
 
-    async def _submit_note(self, note: RedNote) -> RedPublishResult:
+    async def _submit_note(self, note: RedNote, auto_publish: bool) -> RedPublishResult:
         """Submits the note and waits for a success message."""
         try:
             # Save a snapshot right before the final click for debugging.
@@ -63,11 +71,47 @@ class Publisher:
             # This powerful XPath locator finds the button by its content, ignoring comments and whitespace.
             publish_button = self.page.locator("//button[.//span[normalize-space(.) = '发布']]")
             
-            print("Waiting 10 seconds for uploads to finalize...")
-            await self.page.wait_for_timeout(10000) # 10-second wait as requested.
+            # 根据发布模式调整等待时间
+            if auto_publish:
+                wait_time = 10000  # 自动发布模式等待10秒
+                print("Waiting 10 seconds for uploads to finalize...")
+            else:
+                wait_time = 3000   # 手动确认模式等待3秒
+                print("Waiting 3 seconds for uploads to finalize...")
+            
+            await self.page.wait_for_timeout(wait_time)
+            
+            # Ensure the publish button is enabled
+            await expect(publish_button).to_be_enabled(timeout=10000)
+            
+            if not auto_publish:
+                print("内容已准备完毕，发布按钮已启用。")
+                print("auto_publish=False，等待手动确认发布...")
+                print("请在10分钟内手动点击发布按钮完成发布")
+                
+                # Wait for the "发布成功" success message to appear within 10 minutes
+                print("等待手动发布确认，最长等待10分钟...")
+                try:
+                    success_locator = self.page.locator("//*[contains(text(), '发布成功')]")
+                    await expect(success_locator).to_be_visible(timeout=600000)  # 10 minutes = 600,000ms
+                    
+                    print("检测到发布成功确认消息！")
+                    return RedPublishResult(
+                        success=True, 
+                        message="手动发布成功。", 
+                        note_title=note.title,
+                        final_url=self.page.url
+                    )
+                except Exception as e:
+                    print("10分钟内未检测到发布成功消息，可能是超时或用户未完成发布")
+                    return RedPublishResult(
+                        success=False, 
+                        message="等待手动发布超时，10分钟内未检测到发布成功消息。", 
+                        note_title=note.title,
+                        final_url=self.page.url
+                    )
             
             print("Attempting to click the final publish button...")
-            await expect(publish_button).to_be_enabled(timeout=10000)
             await publish_button.click()
             
             # Wait for the "发布成功" success message to appear. This is the most reliable indicator.

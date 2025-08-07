@@ -84,24 +84,55 @@ class Filler:
             # 在内容末尾添加两个换行，为话题留出空间
             await editor_locator.type("\n\n")
 
+            # 记录成功和失败的话题
+            success_topics = []
+            failed_topics = []
+            
             for topic in topics:
-                print(f"  - Adding topic: {topic}")
-                # Step 1: Type the '#' and the topic keyword without a trailing space.
-                await editor_locator.type(f"#{topic}")
+                try:
+                    print(f"  - Adding topic: {topic}")
+                    # Step 1: Type the '#' and the topic keyword without a trailing space.
+                    await editor_locator.type(f"#{topic}")
 
-                # Step 2: Wait for the topic suggestion dropdown to appear.
-                suggestion_list_locator = self.page.locator("#quill-mention-list")
-                await expect(suggestion_list_locator).to_be_visible(timeout=5000)
+                    # Step 2: Wait for the topic suggestion dropdown to appear.
+                    suggestion_list_locator = self.page.locator("#quill-mention-list")
+                    await expect(suggestion_list_locator).to_be_visible(timeout=5000)
 
-                # Step 3: Click the first suggestion to confirm the topic.
-                await suggestion_list_locator.locator(".mention-item").first.click()
-                
-                # Step 4: After confirming, type a space to separate from the next content.
-                await editor_locator.type(" ")
+                    # Step 3: Click the first suggestion to confirm the topic.
+                    await suggestion_list_locator.locator(".mention-item").first.click()
+                    
+                    # Step 4: After confirming, type a space to separate from the next content.
+                    await editor_locator.type(" ")
+                    
+                    success_topics.append(topic)
+                    print(f"    ✓ Successfully added topic: {topic}")
+                    
+                    # 在话题之间添加100ms延迟，避免处理过快
+                    await self.page.wait_for_timeout(100)
+                    
+                except Exception as topic_error:
+                    failed_topics.append(topic)
+                    print(f"    ✗ Failed to add topic '{topic}': {topic_error}")
+                    # 继续处理下一个话题，不中断整个流程
+                    continue
+            
+            # 输出统计信息
+            total = len(topics)
+            success_count = len(success_topics)
+            if success_count == total:
+                print(f"All {total} topics added successfully")
+                return True
+            elif success_count > 0:
+                print(f"Partially successful: {success_count}/{total} topics added")
+                if failed_topics:
+                    print(f"Failed topics: {failed_topics}")
+                return True  # 只要有部分成功就返回True
+            else:
+                print(f"Failed to add any topics")
+                return False
 
-            return True
         except Exception as e:
-            print(f"Error filling topics: {e}")
+            print(f"Error in topics setup: {e}")
             # Save debug info if it fails, to catch any future layout changes.
             await self._save_debug_info("topics_fill_error")
             return False

@@ -362,54 +362,283 @@ class Filler:
             
         try:
             print("Filling topics...")
-            editor_locator = self.page.locator("div.ql-editor")
-            await expect(editor_locator).to_be_visible()
+            
+            # Try multiple selectors to find the editor
+            editor_selectors = [
+                "div.ql-editor",           # Quill editor
+                "div[contenteditable='true']",  # Generic contenteditable
+                ".tiptap",                  # TipTap editor
+                ".ProseMirror"              # ProseMirror editor
+            ]
+            
+            editor_locator = None
+            editor_type = None
+            
+            for selector in editor_selectors:
+                try:
+                    temp_locator = self.page.locator(selector)
+                    # Check if this selector exists and is visible
+                    if await temp_locator.count() > 0:
+                        await expect(temp_locator.first).to_be_visible(timeout=1000)
+                        editor_locator = temp_locator.first
+                        # Determine editor type
+                        if 'ql-editor' in selector:
+                            editor_type = 'quill'
+                        elif 'tiptap' in selector.lower() or 'prosemirror' in selector.lower():
+                            editor_type = 'tiptap'
+                        else:
+                            editor_type = 'generic'
+                        print(f"Found editor with selector: {selector} (type: {editor_type})")
+                        break
+                except:
+                    continue
+            
+            if not editor_locator:
+                print("❌ Could not find any editor for topics")
+                return False
 
             # 确保光标在编辑器内容的末尾
+            print("📍 Moving cursor to end of content...")
+            
+            # Get current content info before moving cursor
+            actual_selector = editor_selectors[0]  # default
+            for sel in editor_selectors:
+                try:
+                    test_loc = self.page.locator(sel)
+                    if await test_loc.count() > 0:
+                        actual_selector = sel
+                        break
+                except:
+                    continue
+            
+            content_info = await self.page.evaluate('''(selector) => {
+                const editor = document.querySelector(selector);
+                if (!editor) return null;
+                const text = editor.innerText || '';
+                return {
+                    length: text.length,
+                    lastChars: text.slice(-50),
+                    hasContent: text.trim().length > 0
+                };
+            }''', actual_selector)
+            
+            print(f"   Current content length: {content_info['length'] if content_info else 'unknown'}")
+            if content_info and content_info['lastChars']:
+                print(f"   Last 50 chars: ...{content_info['lastChars']}")
+            
+            # Click on the editor first to focus it
             await editor_locator.click()
+            await self.page.wait_for_timeout(300)
             
-            # 使用多次按下向下箭头键来确保光标到达内容末尾
-            # 这比使用End键更可靠，因为它会处理多行内容
-            for _ in range(10):  # 最多按10次向下键，应该足够到达末尾
-                await self.page.keyboard.press("ArrowDown")
+            # Move cursor to the absolute end of the document using JavaScript
+            print("   Moving cursor to document end...")
+            cursor_moved = await self.page.evaluate('''(selector) => {
+                try {
+                    const editor = document.querySelector(selector);
+                    if (!editor) return false;
+                    
+                    // Focus the editor
+                    editor.focus();
+                    
+                    // Create a range at the very end of the content
+                    const range = document.createRange();
+                    const selection = window.getSelection();
+                    
+                    // Select the end of the last child node
+                    if (editor.lastChild) {
+                        if (editor.lastChild.nodeType === Node.TEXT_NODE) {
+                            range.setStart(editor.lastChild, editor.lastChild.length);
+                            range.setEnd(editor.lastChild, editor.lastChild.length);
+                        } else {
+                            range.selectNodeContents(editor.lastChild);
+                            range.collapse(false); // Collapse to end
+                        }
+                    } else {
+                        range.selectNodeContents(editor);
+                        range.collapse(false);
+                    }
+                    
+                    // Apply the selection
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    
+                    // Trigger focus event
+                    editor.dispatchEvent(new Event('focus', { bubbles: true }));
+                    
+                    return true;
+                } catch (e) {
+                    console.error('Error moving cursor:', e);
+                    return false;
+                }
+            }''', actual_selector)
             
-            # 然后按End键确保在当前行的末尾
-            await self.page.keyboard.press("End")
+            if cursor_moved:
+                print("   ✓ Cursor moved to end via JavaScript")
+            else:
+                print("   ⚠️ JavaScript cursor move failed, using keyboard shortcuts...")
+                # Fallback to keyboard shortcuts
+                await self.page.keyboard.press("Control+End")
+                await self.page.wait_for_timeout(200)
+                await self.page.keyboard.press("End")
             
-            # 在内容末尾添加两个换行，为话题留出空间
-            await editor_locator.type("\n\n")
+            # Verify cursor position by typing a test character and checking
+            print("   Verifying cursor is at the end...")
+            await self.page.wait_for_timeout(300)
+            
+            # Add one newline before topics (not two, not just space)
+            print("   Adding single newline before topics...")
+            await editor_locator.type("\n")
+            await self.page.wait_for_timeout(200)
 
             # 记录成功和失败的话题
             success_topics = []
             failed_topics = []
             
-            for topic in topics:
-                try:
-                    print(f"  - Adding topic: {topic}")
-                    # Step 1: Type the '#' and the topic keyword without a trailing space.
-                    await editor_locator.type(f"#{topic}")
+            # For TipTap/modern editors, handle popup
+            if editor_type in ['tiptap', 'generic']:
+                print("Using hashtag with popup handling for TipTap/modern editor...")
+                for topic in topics:
+                    try:
+                        print(f"  - Adding topic: {topic}")
+                        
+                        # Type the hashtag
+                        await editor_locator.type(f"#{topic}")
+                        print(f"    Typed #{topic}, waiting for popup...")
+                        await self.page.wait_for_timeout(500)  # Wait for popup
+                        
+                        # Debug: List all visible elements that might be popups
+                        all_elements = await self.page.evaluate('''() => {
+                            const elements = [];
+                            // Find all elements that are visible and might be popups
+                            document.querySelectorAll('*').forEach(el => {
+                                const rect = el.getBoundingClientRect();
+                                const styles = window.getComputedStyle(el);
+                                if (rect.height > 0 && rect.width > 0 && 
+                                    styles.position === 'absolute' || styles.position === 'fixed') {
+                                    const text = el.innerText ? el.innerText.substring(0, 50) : '';
+                                    if (text && text.includes('#')) {
+                                        elements.push({
+                                            tag: el.tagName,
+                                            classes: el.className,
+                                            id: el.id,
+                                            text: text,
+                                            position: styles.position,
+                                            zIndex: styles.zIndex
+                                        });
+                                    }
+                                }
+                            });
+                            return elements;
+                        }''')
+                        if all_elements and len(all_elements) > 0:
+                            print(f"    Potential popup elements: {all_elements[:5]}")  # Show first 5
+                        
+                        # Try to detect and click suggestion popup
+                        popup_found = False
+                        popup_selectors = [
+                            "[class*='mention']",
+                            "[class*='suggestion']",
+                            "[class*='popup']",
+                            "[class*='dropdown']",
+                            "[role='listbox']",
+                            ".select-option",
+                            "[class*='hashtag']",
+                            "ul li",  # Common popup structure
+                            "div[style*='position: absolute']",  # Positioned elements
+                            "div[style*='position: fixed']"
+                        ]
+                        
+                        for popup_sel in popup_selectors:
+                            try:
+                                popup = self.page.locator(popup_sel)
+                                if await popup.count() > 0:
+                                    # Log what we found
+                                    popup_info = await self.page.evaluate(f'''() => {{
+                                        const elements = document.querySelectorAll('{popup_sel}');
+                                        return Array.from(elements).map(el => ({{
+                                            text: el.innerText ? el.innerText.substring(0, 100) : '',
+                                            classes: el.className,
+                                            visible: el.offsetHeight > 0
+                                        }}));
+                                    }}''')
+                                    print(f"    Found popup with selector {popup_sel}: {popup_info}")
+                                    
+                                    # Click first item in popup
+                                    first_item = popup.first
+                                    await first_item.click()
+                                    popup_found = True
+                                    print(f"    Clicked first suggestion in popup")
+                                    break
+                            except:
+                                continue
+                        
+                        if not popup_found:
+                            print(f"    No popup found, pressing Enter to confirm")
+                            # If no popup, try pressing Enter to confirm
+                            await self.page.keyboard.press("Enter")
+                        
+                        # Add space after topic
+                        await editor_locator.type(" ")
+                        await self.page.wait_for_timeout(200)
+                        
+                        success_topics.append(topic)
+                        print(f"    ✓ Successfully added topic: {topic}")
+                    except Exception as topic_error:
+                        failed_topics.append(topic)
+                        print(f"    ✗ Failed to add topic '{topic}': {topic_error}")
+                        continue
+            else:
+                # Original approach for Quill editors
+                for topic in topics:
+                    try:
+                        print(f"  - Adding topic: {topic}")
+                        # Step 1: Type the '#' and the topic keyword without a trailing space.
+                        await editor_locator.type(f"#{topic}")
 
-                    # Step 2: Wait for the topic suggestion dropdown to appear.
-                    suggestion_list_locator = self.page.locator("#quill-mention-list")
-                    await expect(suggestion_list_locator).to_be_visible(timeout=5000)
-
-                    # Step 3: Click the first suggestion to confirm the topic.
-                    await suggestion_list_locator.locator(".mention-item").first.click()
-                    
-                    # Step 4: After confirming, type a space to separate from the next content.
-                    await editor_locator.type(" ")
-                    
-                    success_topics.append(topic)
-                    print(f"    ✓ Successfully added topic: {topic}")
-                    
-                    # 在话题之间添加100ms延迟，避免处理过快
-                    await self.page.wait_for_timeout(100)
-                    
-                except Exception as topic_error:
-                    failed_topics.append(topic)
-                    print(f"    ✗ Failed to add topic '{topic}': {topic_error}")
-                    # 继续处理下一个话题，不中断整个流程
-                    continue
+                        # Step 2: Wait for the topic suggestion dropdown to appear.
+                        # Try multiple possible selectors for suggestion list
+                        suggestion_selectors = [
+                            "#quill-mention-list",
+                            ".mention-list",
+                            "[class*='mention']",
+                            "[class*='suggestion']",
+                            ".hashtag-suggestions"
+                        ]
+                        
+                        suggestion_list_locator = None
+                        for sel in suggestion_selectors:
+                            try:
+                                temp_suggestion = self.page.locator(sel)
+                                await expect(temp_suggestion).to_be_visible(timeout=2000)
+                                suggestion_list_locator = temp_suggestion
+                                print(f"    Found suggestion list with selector: {sel}")
+                                break
+                            except:
+                                continue
+                        
+                        if suggestion_list_locator:
+                            # Step 3: Click the first suggestion to confirm the topic.
+                            first_item = suggestion_list_locator.locator(".mention-item, li, div").first
+                            await first_item.click()
+                            print(f"    Clicked first suggestion")
+                        else:
+                            # No suggestion list, just add a space
+                            print(f"    No suggestion list found, continuing with space")
+                        
+                        # Step 4: After confirming, type a space to separate from the next content.
+                        await editor_locator.type(" ")
+                        
+                        success_topics.append(topic)
+                        print(f"    ✓ Successfully added topic: {topic}")
+                        
+                        # 在话题之间添加100ms延迟，避免处理过快
+                        await self.page.wait_for_timeout(100)
+                        
+                    except Exception as topic_error:
+                        failed_topics.append(topic)
+                        print(f"    ✗ Failed to add topic '{topic}': {topic_error}")
+                        # 继续处理下一个话题，不中断整个流程
+                        continue
             
             # 输出统计信息
             total = len(topics)

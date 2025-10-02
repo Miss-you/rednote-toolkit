@@ -1,6 +1,77 @@
 # 更新日志
 
-## 2025-09-02 - 适配新版本小红书web版
+## 2025-09-02 - 全面修复内容填充和话题插入功能
+
+本次更新主要解决了小红书使用TipTap/ProseMirror编辑器后，内容填充和话题插入失败的问题。
+
+### 问题背景 (Issue Background)
+
+小红书创作平台已从Quill编辑器切换到TipTap/ProseMirror编辑器，导致原有的内容填充逻辑失效：
+- 编辑器元素无法找到（`div.ql-editor` 选择器失效）
+- 内容填充后无法保存（JavaScript事件处理不同）
+- 话题插入位置错误且无法处理弹窗
+
+### 主要修改 (Major Changes)
+
+#### 1. **内容填充功能全面重构** (`filler.py: fill_content`)
+- **添加等待和重试机制**：初始等待2秒让编辑器加载，最多重试3次
+- **多选择器支持**：尝试6种不同选择器查找编辑器
+  - `div.ql-editor` (Quill)
+  - `div[contenteditable='true']` (通用)
+  - `.tiptap` (TipTap)
+  - `.ProseMirror` (ProseMirror)
+  - `.content-input`
+  - `#content-input`
+- **三种填充策略**：
+  - 策略A：JavaScript直接设置内容（针对不同编辑器类型优化）
+  - 策略B：点击激活 + type()方法（模拟真实输入）
+  - 策略C：原fill()方法作为备用
+- **增强的内容验证**：更宽松的验证逻辑，支持多种编辑器类型
+- **详细的调试日志**：显示编辑器状态、找到的元素、失败原因
+
+#### 2. **话题插入功能优化** (`filler.py: fill_topics`)
+- **自动检测编辑器类型**：识别TipTap/ProseMirror或Quill
+- **精确的光标定位**：
+  - 使用JavaScript API直接定位到文档末尾
+  - 回退到Ctrl+End键盘快捷键
+  - 只添加单个换行符分隔内容和话题
+- **话题弹窗处理**：
+  - 等待弹窗出现（500ms）
+  - 尝试多种选择器查找弹窗
+  - 点击第一个建议项或按Enter确认
+- **调试信息增强**：显示内容长度、最后50个字符、找到的弹窗元素
+
+#### 3. **验证逻辑改进** (`filler.py: _verify_content_filled`)
+- 尝试多个选择器查找内容
+- 更宽松的内容匹配（只检查前20个字符）
+- 支持极短内容的验证
+
+### 技术细节 (Technical Details)
+
+#### JavaScript语法问题修复
+- 问题：f-string格式化JavaScript代码时花括号转义错误
+- 解决：改用参数传递方式，避免字符串插值
+```python
+# 之前（错误）
+await self.page.evaluate(f'''() => {{ ... }}''')
+# 之后（正确）
+await self.page.evaluate('''(args) => { ... }''', args)
+```
+
+#### TipTap编辑器特殊处理
+- 使用`document.execCommand('insertText')`而不是直接设置innerHTML
+- 使用Selection API精确控制光标位置
+- 触发正确的事件（input, change）
+
+### 测试结果 (Test Results)
+- ✅ 成功找到并识别TipTap编辑器
+- ✅ 内容填充成功率大幅提升
+- ✅ 话题插入到正确位置（文档末尾）
+- ✅ 话题弹窗正确处理
+
+---
+
+## 2025-09-02 (早期版本) - 适配新版本小红书web版
 
 本次更新主要针对小红书web版的界面变化进行了全面适配，显著增强了话题填充功能的稳定性和准确性。
 

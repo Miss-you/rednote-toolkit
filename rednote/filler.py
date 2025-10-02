@@ -225,7 +225,7 @@ class Filler:
                     # Select all and delete
                     await self.page.keyboard.press("Control+A")
                     await self.page.keyboard.press("Backspace")
-                    await self.page.wait_for_timeout(200)
+                    await self.page.wait_for_timeout(100)
                     
                     # Type content more slowly for TipTap
                     await content_element.type(content, delay=50)
@@ -379,7 +379,7 @@ class Filler:
                     temp_locator = self.page.locator(selector)
                     # Check if this selector exists and is visible
                     if await temp_locator.count() > 0:
-                        await expect(temp_locator.first).to_be_visible(timeout=1000)
+                        await expect(temp_locator.first).to_be_visible(timeout=3000)
                         editor_locator = temp_locator.first
                         # Determine editor type
                         if 'ql-editor' in selector:
@@ -503,8 +503,8 @@ class Filler:
                         
                         # Type the hashtag
                         await editor_locator.type(f"#{topic}")
-                        print(f"    Typed #{topic}, waiting for popup...")
-                        await self.page.wait_for_timeout(500)  # Wait for popup
+                        print(f"    Typed #{topic}, waiting for popup (2s)...")
+                        await self.page.wait_for_timeout(2000)  # Wait for popup to fully render
                         
                         # Debug: List all visible elements that might be popups
                         all_elements = await self.page.evaluate('''() => {
@@ -563,18 +563,34 @@ class Filler:
                                     }}''')
                                     print(f"    Found popup with selector {popup_sel}: {popup_info}")
                                     
-                                    # Click first item in popup
-                                    first_item = popup.first
-                                    await first_item.click()
-                                    popup_found = True
-                                    print(f"    Clicked first suggestion in popup")
-                                    break
+                                    # Click first suggestion item inside popup (wait for item to render)
+                                    container = popup.first
+                                    item_selector = ".mention-item, li, [role='option'], .select-option, [class*='hashtag']"
+                                    suggestion_items = container.locator(item_selector)
+                                    attempted = 0
+                                    while attempted < 4 and not popup_found:
+                                        try:
+                                            if await suggestion_items.count() > 0:
+                                                try:
+                                                    await expect(suggestion_items.first).to_be_visible(timeout=200)
+                                                except Exception:
+                                                    # If visibility check times out, still attempt click
+                                                    pass
+                                                await suggestion_items.first.click()
+                                                popup_found = True
+                                                print(f"    Clicked first suggestion item (attempt {attempted+1})")
+                                                break
+                                        except Exception:
+                                            pass
+                                        attempted += 1
+                                        await self.page.wait_for_timeout(500)
                             except:
                                 continue
                         
                         if not popup_found:
+                        
                             print(f"    No popup found, pressing Enter to confirm")
-                            # If no popup, try pressing Enter to confirm
+                        
                             await self.page.keyboard.press("Enter")
                         
                         # Add space after topic
